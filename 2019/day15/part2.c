@@ -48,12 +48,13 @@ typedef struct tile_t{
     struct tile_t *south;
     struct tile_t *west;
     struct tile_t *east;
+    int depth;  // for part2
 } tile_t;
 
 typedef struct tile_t tile_t;
 
 
-#define TILE_POOL_SIZE  (256 * 1024)
+#define TILE_POOL_SIZE  (2 * 1024)
 
 static tile_t tile_pool[TILE_POOL_SIZE] = {0};
 static size_t tile_pool_next = 0;
@@ -101,7 +102,6 @@ static tile_t *tile_get_neighbour(tile_t *origin, direction_t direction) {
         default: PANIC("Invalid direction");
     }
 
-
     return tile;
 }
 
@@ -118,36 +118,8 @@ static tile_t *tile_get_next(tile_t *tile, direction_t direction) {
 }
 
 
-#define DRAW_MAP_SIZE  43   // keep odd
-#define DRAW_MAP_UP    (DRAW_MAP_SIZE / 2)
-#define DRAW_MAP_DOWN  (-(DRAW_MAP_SIZE / 2))
-#define DRAW_MAP_LEFT  (-(DRAW_MAP_SIZE / 2))
-#define DRAW_MAP_RIGHT (DRAW_MAP_SIZE / 2)
-#define POS_TO_DRAW_X(x)  ((x) + (DRAW_MAP_SIZE / 2))
-#define POS_TO_DRAW_Y(y)  ((y) + (DRAW_MAP_SIZE / 2))
-
-typedef struct {
-    software_t soft;
-    tile_t *tiles;
-    tile_t *position;
-    direction_t move_command;
-    droid_status_t status;
-    tile_t *oxygen;
-    int oxygen_distance;
-} droid_t;
-
-#define TO_DROID(soft_ptr)  ((droid_t *) (soft_ptr))
-
-#define POS_IN_DRAW_RANGE(x, y)  \
-  (((x) <= DRAW_MAP_RIGHT) \
-    && ((x) >= DRAW_MAP_LEFT) \
-    && ((y) <= DRAW_MAP_UP) \
-    && ((y) >= DRAW_MAP_DOWN))
-
-
-typedef bool (*callback_dfs_visit)(tile_t *visiting, void *user_data);
-typedef void (*callback_dfs_backtrack)(tile_t *tile, void *user_data);
-
+typedef bool (*callback_visit)(tile_t *visiting, void *user_data);
+typedef void (*callback_backtrack)(tile_t *tile, void *user_data);
 
 static bool was_visited(tile_t **visited, tile_t *target) {
     while(*visited) {
@@ -167,39 +139,43 @@ static void push_visited(tile_t **visited, tile_t *target) {
 }
 
 typedef struct {
-    droid_t *droid;
-    direction_t move_queue[TILE_POOL_SIZE];
-} droid_walk_data_t;
+    tile_t *queue[TILE_POOL_SIZE];
+    size_t in;
+    size_t out;
+} visited_queue_t;
 
-static void move_queue_push(direction_t *queue, direction_t direction) {
-    while(*queue) {
-        queue++;
+
+static void visited_queue_push(visited_queue_t *queue, tile_t *visited) {
+    queue->queue[queue->in] = visited;
+    queue->in += 1;
+    if(queue->in >= TILE_POOL_SIZE) {
+        queue->in = 0;
     }
-    *queue = direction;
+    if(queue->in == queue->out) {
+        PANIC("Queue overflow");
+    }
 }
 
-static direction_t move_queue_pop(direction_t *queue) {
-    direction_t *last = queue;
-    while(*queue) {
-        last = queue++;
+static tile_t *visited_queue_pop(visited_queue_t *queue) {
+    if(queue->in == queue->out) {
+        return NULL;  // empty
+    } else {
+        tile_t *popped = queue->queue[queue->out];
+        queue->queue[queue->out] = NULL;
+        queue->out++;
+        if(queue->out >= TILE_POOL_SIZE) {
+            queue->out = 0;
+        }
+        return popped;
     }
-    direction_t popped = *last;
-    *last = 0;
-    return popped;
 }
 
-static int move_queue_size(direction_t *queue) {
-    int size = 0;
-    while(*queue++) {
-        size++;
-    }
-    return size;
-}
 
+// Call tile_dfs_walk() instead if this function.
 static void tile_dfs_walk_inner(
         tile_t *tile,
-        callback_dfs_visit cb_visit,
-        callback_dfs_backtrack cb_backtrack,
+        callback_visit cb_visit,
+        callback_backtrack cb_backtrack,
         void *user_data,
         tile_t **visited
 ) {
@@ -227,8 +203,8 @@ static void tile_dfs_walk_inner(
 // During backtracking cb_backtrack is called.
 static void tile_dfs_walk(
         tile_t *tile,
-        callback_dfs_visit cb_visit,
-        callback_dfs_backtrack cb_backtrack,
+        callback_visit cb_visit,
+        callback_backtrack cb_backtrack,
         void *user_data
 ) {
     // This entry function prepare the visited tile tracker then call the
@@ -238,42 +214,58 @@ static void tile_dfs_walk(
 }
 
 
-static void droid_draw_map(droid_t *droid) {
-#if ENABLE_DRAW
-    char map[DRAW_MAP_SIZE][DRAW_MAP_SIZE] = {0};
-    memset(map, ' ', sizeof(map));
+// Call tile_bfs_walk() instead if this function.
+static void tile_bfs_walk_inner(
+        tile_t *tile,
+        callback_visit cb_visit,
+        void *user_data,
+        tile_t **visited,
+        visited_queue_t *queue
+) {
+    push_visited(visited, tile);
+    visited_queue_push(queue, tile);
 
-    for(size_t tile_idx = 0; tile_idx < tile_pool_next; tile_idx++) {
-        const tile_t *tile = &tile_pool[tile_idx];
-        if(POS_IN_DRAW_RANGE(tile->x, tile->y)) {
-            map[POS_TO_DRAW_X(tile->x)][POS_TO_DRAW_Y(tile->y)] = tile->type;
+    tile_t *target;
+    while((target = visited_queue_pop(queue))) {
+        if(cb_visit) {
+            if(!cb_visit(target, user_data)) {
+                continue;
+            }
+        }
+
+        for(direction_t direction = NORTH; direction <= EAST; direction++) {
+            tile_t *next = tile_get_next(target, direction);
+            if(!was_visited(visited, next)) {
+                push_visited(visited, next);
+                visited_queue_push(queue, next);
+            }
         }
     }
-
-    if(POS_IN_DRAW_RANGE(droid->position->x, droid->position->y)) {
-        map[POS_TO_DRAW_X(droid->position->x)][POS_TO_DRAW_Y(droid->position->y)] = TILE_DROID;
-    }
-
-    printf("    ");
-    for(int x = 0; x < DRAW_MAP_SIZE; ++x) {
-        printf("%d", (int)ABS(x + DRAW_MAP_DOWN) % 10);
-    }
-    printf("\n");
-    for(int y = DRAW_MAP_SIZE - 1; y >= 0; --y) {
-        printf("%3d ", y + DRAW_MAP_DOWN);
-        for(int x = 0; x < DRAW_MAP_SIZE; ++x) {
-            printf("%c", map[x][y]);
-        }
-        printf("\n");
-    }
-    printf("\n");
-
-    usleep(33333);
-#else
-    (void) droid;
-#endif
 }
 
+// Breadth-First Search algorithm
+// See tile_dfs_walk
+static void tile_bfs_walk(
+        tile_t *tile,
+        callback_visit cb_visit,
+        void *user_data
+) {
+    // This entry function prepare the visited tile tracker then call the
+    // function with the proper implementation.
+    tile_t *visited[TILE_POOL_SIZE] = {0};
+    visited_queue_t queue = {0};
+    tile_bfs_walk_inner(tile, cb_visit, user_data, visited, &queue);
+}
+
+typedef struct {
+    software_t soft;
+    tile_t *tiles;
+    tile_t *position;
+    direction_t move_command;
+    droid_status_t status;
+} droid_t;
+
+#define TO_DROID(soft_ptr)  ((droid_t *) (soft_ptr))
 
 static error_t droid_get_input(software_t *soft, icword_t *value)
 {
@@ -310,6 +302,39 @@ static void droid_destroy(droid_t *droid)
     intcode_destroy(&droid->soft);
 }
 
+typedef struct {
+    droid_t *droid;
+    direction_t move_stack[TILE_POOL_SIZE];
+    tile_t *oxygen;
+    int oxygen_distance;
+    int max_queue_size;
+} droid_walk_data_t;
+
+static void move_stack_push(direction_t *queue, direction_t direction) {
+    while(*queue) {
+        queue++;
+    }
+    *queue = direction;
+}
+
+static direction_t move_stack_pop(direction_t *queue) {
+    direction_t *last = queue;
+    while(*queue) {
+        last = queue++;
+    }
+    direction_t popped = *last;
+    *last = 0;
+    return popped;
+}
+
+static int move_stack_size(direction_t *queue) {
+    int size = 0;
+    while(*queue++) {
+        size++;
+    }
+    return size;
+}
+
 
 static bool droid_walk_visit_callback(tile_t *visiting, void *user_data) {
     droid_walk_data_t *data = (droid_walk_data_t *) user_data;
@@ -330,7 +355,11 @@ static bool droid_walk_visit_callback(tile_t *visiting, void *user_data) {
     }
 
     droid->move_command = move_command;
-    move_queue_push(data->move_queue, move_command);
+    move_stack_push(data->move_stack, move_command);
+    int queue_size = move_stack_size(data->move_stack);
+    if(queue_size > data->max_queue_size) {
+        data->max_queue_size = queue_size;
+    }
 
     // Loop the Intcode machine until it yields an output.
     error_t error;
@@ -346,11 +375,11 @@ static bool droid_walk_visit_callback(tile_t *visiting, void *user_data) {
                     case STATUS_WALL:
                         visiting->type = TILE_WALL;
                         backtrack = true;
-                        move_queue_pop(data->move_queue);
+                        move_stack_pop(data->move_stack);
                         break;
                     case STATUS_OXYGEN:
-                        droid->oxygen = visiting;
-                        droid->oxygen_distance = move_queue_size(data->move_queue);
+                        data->oxygen = visiting;
+                        data->oxygen_distance = move_stack_size(data->move_stack);
                         /* fallthrough */
                     case STATUS_MOVE:
                         visiting->type = (droid->status == STATUS_MOVE) ? TILE_FLOOR : TILE_OXYGEN;
@@ -361,8 +390,6 @@ static bool droid_walk_visit_callback(tile_t *visiting, void *user_data) {
                         return ERR_FAILURE;
                 }
                 goto end;
-                droid->position = visiting;
-                break;
             case ERR_WAIT_INPUT:
                 return true;
             case ERR_FAILURE:
@@ -372,7 +399,6 @@ static bool droid_walk_visit_callback(tile_t *visiting, void *user_data) {
     }
 
     end:
-    droid_draw_map(droid);
     return !backtrack;
 }
 
@@ -383,7 +409,7 @@ static void droid_walk_backtrack_callback(tile_t *tile, void *user_data) {
     (void) tile;
 
     direction_t direction;
-    switch(move_queue_pop(data->move_queue)) {
+    switch(move_stack_pop(data->move_stack)) {
         case NORTH: direction = SOUTH; break;
         case SOUTH: direction = NORTH; break;
         case WEST: direction = EAST; break;
@@ -403,29 +429,104 @@ static void droid_walk_backtrack_callback(tile_t *tile, void *user_data) {
     }
 
     droid->position = tile_get_neighbour(droid->position, direction);
+}
 
-    droid_draw_map(droid);
+#define DEPTH_MAX  TILE_POOL_SIZE
+
+typedef struct {
+    droid_t *droid;
+    int depth_max;
+} oxygen_fill_data_t;
+
+static int neighbour_depth(tile_t *current, direction_t direction) {
+    tile_t *neighbour = tile_get_neighbour(current, direction);
+    if(neighbour->type == TILE_WALL) {
+        return DEPTH_MAX;
+    }
+    return neighbour->depth;
+}
+
+static bool oxygen_fill_visit_callback(tile_t *visiting, void *user_data) {
+    if(visiting->type == TILE_WALL) {
+        return false;
+    }
+
+    oxygen_fill_data_t *data = user_data;
+
+    int neighbour_min_depth = DEPTH_MAX;
+    int depth;
+
+    depth = neighbour_depth(visiting, NORTH);
+    if(depth > 0 && depth < neighbour_min_depth) {
+        neighbour_min_depth = depth;
+    }
+    depth = neighbour_depth(visiting, SOUTH);
+    if(depth > 0 && depth < neighbour_min_depth) {
+        neighbour_min_depth = depth;
+    }
+    depth = neighbour_depth(visiting, WEST);
+    if(depth > 0 && depth < neighbour_min_depth) {
+        neighbour_min_depth = depth;
+    }
+    depth = neighbour_depth(visiting, EAST);
+    if(depth > 0 && depth < neighbour_min_depth) {
+        neighbour_min_depth = depth;
+    }
+
+    if(neighbour_min_depth != DEPTH_MAX) {
+        visiting->depth = neighbour_min_depth + 1;
+        if(visiting->depth > data->depth_max) {
+            data->depth_max = visiting->depth;
+        }
+        visiting->type = '0' + (visiting->depth % 10);
+    }
+
+    droid_t *droid = user_data;
+    droid->position = visiting;
+
+    return true;
 }
 
 static void droid_run(droid_t *droid) {
-    droid_walk_data_t walk_data = {
+    droid_walk_data_t data = {
         .droid = droid,
-        .move_queue = {0},
+        .move_stack = {0},
+        .oxygen = NULL,
+        .oxygen_distance = 0,
     };
 
     tile_dfs_walk(
         droid->tiles,
         droid_walk_visit_callback,
         droid_walk_backtrack_callback,
-        &walk_data
+        &data
     );
 
-    if(droid->oxygen) {
+    if(data.oxygen) {
         printf("Found oxygen at x=%d y=%d, distance=%d\n",
-            droid->oxygen->x, droid->oxygen->y, droid->oxygen_distance);
+            data.oxygen->x, data.oxygen->y, data.oxygen_distance);
     } else {
         printf("Didn't find oxygen");
     }
+
+
+    // Part 2: we have the full map of the ship, no need of the droid or Incode.
+    // Use BFS algorithm for finding the fill time.
+
+    data.oxygen->depth = 1;
+
+    oxygen_fill_data_t oxygen_fill_data = {
+        .droid = droid,
+        .depth_max = 0,
+    };
+
+    tile_bfs_walk(
+        data.oxygen,
+        oxygen_fill_visit_callback,
+        &oxygen_fill_data
+    );
+
+    printf("Fill time = %d\n", oxygen_fill_data.depth_max - 1);
 }
 
 

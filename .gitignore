@@ -1,6 +1,7 @@
 .vscode
 *.exe
 *.out
+*.o
 
 # assume no extension = executable
 part1
