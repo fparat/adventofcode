@@ -6,3 +6,5 @@
 # assume no extension = executable
 part1
 part2
+
+test_*
