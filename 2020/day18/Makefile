@@ -5,8 +5,8 @@ RUSTFLAGS = -g -O
 	$(RUSTC) $(RUSTFLAGS) -o $@ $<
 
 .PHONY: all
-all: part1
+all: part1 part2
 
 .PHONY: clean
 clean:
-	rm -f part1
+	rm -f part1 part2
