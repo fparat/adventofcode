@@ -64,7 +64,7 @@ static error_t soft_set_output_unimplemented(struct software *soft, icword_t val
 void intcode_init(software_t *soft)
 {
     memset(soft, 0, sizeof(*soft));
-    soft-> mem = malloc(MEM_SIZE_MAX);
+    soft->mem = calloc(MEM_SIZE_MAX, 1);
     soft->get_input = soft_get_input_unimplemented;
     soft->set_output = soft_set_output_unimplemented;
 }
