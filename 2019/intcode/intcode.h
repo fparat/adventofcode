@@ -64,6 +64,8 @@ void intcode_init(software_t *soft);
 
 void intcode_destroy(software_t *soft);
 
+void intcode_clone(software_t *to, const software_t *from);
+
 /**
  * Read the given file into the intcode software.
  * Return number of positions, or -1 for failure.

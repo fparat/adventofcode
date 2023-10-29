@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 #include "intcode.h"
 
 #define OP_ADD          1
@@ -73,6 +74,19 @@ void intcode_init(software_t *soft)
 void intcode_destroy(software_t *soft)
 {
     free(soft->mem);
+}
+
+
+void intcode_clone(software_t *dst, const software_t *src)
+{
+    assert(dst->mem); // ensure destination is init
+
+    memcpy(dst->mem, src->mem, MEM_SIZE_MAX);
+    dst->size = src->size;
+    dst->get_input = src->get_input;
+    dst->set_output = src->set_output;
+    dst->pc = src->pc;
+    dst->base = src->base;
 }
 
 
