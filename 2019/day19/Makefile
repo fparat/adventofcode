@@ -1,6 +1,6 @@
 CC=clang
 
-CFLAGS = -g -Wall -Wextra
+CFLAGS = -g -Wall -Wextra -O3
 INC = -I../intcode
 # DEFINES = -DENABLE_TRACE
 
