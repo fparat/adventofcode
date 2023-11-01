@@ -72,7 +72,10 @@ void intcode_clone(software_t *to, const software_t *from);
  */
 int intcode_read_from_file(software_t *soft, const char *filename);
 
-/** Run the IntCode program. */
+/** Run a step of the IntCode program. */
+error_t intcode_step(software_t *soft);
+
+/** Run the IntCode program until it ends. */
 error_t intcode_run(software_t *soft);
 
 

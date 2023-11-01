@@ -164,7 +164,7 @@ static int param_num(int op)
 }
 
 
-error_t intcode_run(software_t *soft)
+error_t intcode_step(software_t *soft)
 {
     icword_t *mem = soft->mem;
     icsize_t size = soft->size;
@@ -177,110 +177,121 @@ error_t intcode_run(software_t *soft)
     icsize_t write_pos;
     error_t error = ERR_SUCCESS;
 
-    while((error == ERR_SUCCESS) && (OP(mem[soft->pc]) != OP_HLT)) {
-        TRACE(("-----\n"));
-        TRACE(("pc="FMT_S", ["FMT_W", "FMT_W", "FMT_W", "FMT_W"]\n",
-            soft->pc, mem[soft->pc], mem[soft->pc+1], mem[soft->pc+2], mem[soft->pc+3]));
+    TRACE(("-----\n"));
+    TRACE(("pc="FMT_S", ["FMT_W", "FMT_W", "FMT_W", "FMT_W"]\n",
+        soft->pc, mem[soft->pc], mem[soft->pc+1], mem[soft->pc+2], mem[soft->pc+3]));
 
-        dump(mem, soft->size);
+    dump(mem, soft->size);
 
-        op = OP(mem[soft->pc]);
-        pnum = param_num(op);
-        for(i = 0; i < pnum; ++i) {
-            param[i] = param_value(soft, i);
-        }
-        offset = pnum + 1;
-
-        TRACE(("op="FMT_W", params: "FMT_W", "FMT_W"\n", op, param[0], param[1]));
-
-        switch(op) {
-            case OP_ADD:
-                write_pos = param_pos(soft, 2);
-                TRACE(("ADD: "FMT_W" + "FMT_W" -> ("FMT_S")\n", param[0], param[1], write_pos));
-                mem[write_pos] = param[0] + param[1];
-                break;
-
-            case OP_MUL:
-                write_pos = param_pos(soft, 2);
-                TRACE(("MUL: "FMT_W" * "FMT_W" -> ("FMT_S")\n", param[0], param[1], write_pos));
-                mem[write_pos] = param[0] * param[1];
-                break;
-
-            case OP_INPUT:
-                switch(soft->get_input(soft, &value)) {
-                    case ERR_SUCCESS:
-                        write_pos = param_pos(soft, 0);
-                        TRACE(("INPUT: "FMT_W" -> ("FMT_S")\n", value, write_pos));
-                        mem[write_pos] = value;
-                        break;
-                    case ERR_WAIT_INPUT:
-                        TRACE(("WAIT INPUT\n"));
-                        return ERR_WAIT_INPUT;
-                    case ERR_FAILURE:
-                    default:
-                        PANIC("Critical error");
-                        break;
-                }
-                break;
-
-            case OP_OUTPUT:
-                TRACE(("OUTPUT: "FMT_W"\n", param[0]));
-                error = soft->set_output(soft, param[0]);
-                break;
-
-            case OP_JMP_TRUE:
-                TRACE(("JMPTRUE: "FMT_W"", param[0]));
-                if(param[0]) {
-                    TRACE((" -> true @"FMT_W"\n", param[1]));
-                    soft->pc = param[1];
-                    offset = 0;
-                } else {
-                    TRACE((" -> false\n"));
-                }
-                break;
-
-            case OP_JMP_FALSE:
-                TRACE(("JMPTRUE: "FMT_W"", param[0]));
-                if(!param[0]) {
-                    TRACE((" -> false @"FMT_W"\n", param[1]));
-                    soft->pc = param[1];
-                    offset = 0;
-                } else {
-                    TRACE((" -> true\n"));
-                }
-                break;
-
-            case OP_LESS:
-                write_pos = param_pos(soft, 2);
-                TRACE(("LESS: "FMT_W" < "FMT_W" -> "FMT_S"\n", param[0], param[1], write_pos));
-                mem[write_pos] = (param[0] < param[1]) ? 1 : 0;
-                break;
-
-            case OP_EQUAL:
-                write_pos = param_pos(soft, 2);
-                TRACE(("EQUAL: "FMT_W" == "FMT_W" -> "FMT_S"\n", param[0], param[1], write_pos));
-                mem[write_pos] = (param[0] == param[1]) ? 1 : 0;
-                break;
-
-            case OP_BASE_ADD:
-                TRACE(("BASE_ADD: "FMT_S" (+"FMT_W")", soft->base, param[0]));
-                soft->base += param[0];
-                TRACE((" -> "FMT_S"\n", soft->base));
-                break;
-
-            default:
-                return ERR_FAILURE;
-        }
-
-        TRACE(("offset="FMT_S"\n", offset));
-        soft->pc += offset;
-
-        if(soft->pc > size) {
-            return ERR_FAILURE;
-        }
+    op = OP(mem[soft->pc]);
+    pnum = param_num(op);
+    for(i = 0; i < pnum; ++i) {
+        param[i] = param_value(soft, i);
     }
+    offset = pnum + 1;
+
+    TRACE(("op="FMT_W", params: "FMT_W", "FMT_W"\n", op, param[0], param[1]));
+
+    switch(op) {
+        case OP_ADD:
+            write_pos = param_pos(soft, 2);
+            TRACE(("ADD: "FMT_W" + "FMT_W" -> ("FMT_S")\n", param[0], param[1], write_pos));
+            mem[write_pos] = param[0] + param[1];
+            break;
+
+        case OP_MUL:
+            write_pos = param_pos(soft, 2);
+            TRACE(("MUL: "FMT_W" * "FMT_W" -> ("FMT_S")\n", param[0], param[1], write_pos));
+            mem[write_pos] = param[0] * param[1];
+            break;
+
+        case OP_INPUT:
+            switch(soft->get_input(soft, &value)) {
+                case ERR_SUCCESS:
+                    write_pos = param_pos(soft, 0);
+                    TRACE(("INPUT: "FMT_W" -> ("FMT_S")\n", value, write_pos));
+                    mem[write_pos] = value;
+                    break;
+                case ERR_WAIT_INPUT:
+                    TRACE(("WAIT INPUT\n"));
+                    return ERR_WAIT_INPUT;
+                case ERR_FAILURE:
+                default:
+                    PANIC("Critical error");
+                    break;
+            }
+            break;
+
+        case OP_OUTPUT:
+            TRACE(("OUTPUT: "FMT_W"\n", param[0]));
+            error = soft->set_output(soft, param[0]);
+            break;
+
+        case OP_JMP_TRUE:
+            TRACE(("JMPTRUE: "FMT_W"", param[0]));
+            if(param[0]) {
+                TRACE((" -> true @"FMT_W"\n", param[1]));
+                soft->pc = param[1];
+                offset = 0;
+            } else {
+                TRACE((" -> false\n"));
+            }
+            break;
+
+        case OP_JMP_FALSE:
+            TRACE(("JMPTRUE: "FMT_W"", param[0]));
+            if(!param[0]) {
+                TRACE((" -> false @"FMT_W"\n", param[1]));
+                soft->pc = param[1];
+                offset = 0;
+            } else {
+                TRACE((" -> true\n"));
+            }
+            break;
+
+        case OP_LESS:
+            write_pos = param_pos(soft, 2);
+            TRACE(("LESS: "FMT_W" < "FMT_W" -> "FMT_S"\n", param[0], param[1], write_pos));
+            mem[write_pos] = (param[0] < param[1]) ? 1 : 0;
+            break;
+
+        case OP_EQUAL:
+            write_pos = param_pos(soft, 2);
+            TRACE(("EQUAL: "FMT_W" == "FMT_W" -> "FMT_S"\n", param[0], param[1], write_pos));
+            mem[write_pos] = (param[0] == param[1]) ? 1 : 0;
+            break;
+
+        case OP_BASE_ADD:
+            TRACE(("BASE_ADD: "FMT_S" (+"FMT_W")", soft->base, param[0]));
+            soft->base += param[0];
+            TRACE((" -> "FMT_S"\n", soft->base));
+            break;
+
+        default:
+            return ERR_FAILURE;
+    }
+
+    TRACE(("offset="FMT_S"\n", offset));
+    soft->pc += offset;
+
+    if(soft->pc > size) {
+        return ERR_FAILURE;
+    }
+
+    return error;
+}
+
+
+error_t intcode_run(software_t *soft)
+{
+    error_t error = ERR_SUCCESS;
+
+    while((error == ERR_SUCCESS) && (OP(soft->mem[soft->pc]) != OP_HLT)) {
+        error = intcode_step(soft);
+    }
+
     TRACE(("suspend\n"));
-    dump(mem, size);
+    dump(soft->mem, soft->size);
 
     return error;
 }
