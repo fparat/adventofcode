@@ -13,3 +13,7 @@ all: part1 part2
 .PHONY: clean
 clean:
 	rm -f part1 part2
+
+.PHONY: fmt
+fmt:
+	rustfmt --edition 2021 *.rs
